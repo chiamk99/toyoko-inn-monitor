@@ -1,0 +1,13 @@
+{
+  "checkin": "2026-08-02",
+  "checkout": "2026-08-03",
+  "people": 1,
+  "room": 1,
+  "smoking": "all",
+  "hotels": [
+    { "code": "00316", "name": "東橫INN 上越妙高站西口" },
+    { "code": "00331", "name": "東橫INN 燕三條站前" },
+    { "code": "00186", "name": "東橫INN 新潟古町" },
+    { "code": "00060", "name": "東橫INN 新潟站前" }
+  ]
+}
