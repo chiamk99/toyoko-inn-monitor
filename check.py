@@ -128,27 +128,30 @@ def main():
         for hotel in config["hotels"]:
             code = hotel["code"]
             plans = fetch_available_plans(config, stay, code)
-            available = len(plans) > 0
-            was_available = stay_state.get(code, {}).get("available", False)
+            previously_available = set(stay_state.get(code, {}))
 
-            if available and not was_available:
-                newly_available.append((hotel, plans))
+            new_plans = [
+                p for p in plans if f"{p['room_type']}|{p['plan_name']}" not in previously_available
+            ]
+            if new_plans:
+                newly_available.append((hotel, new_plans))
 
-            cheapest = min((p["price"] for p in plans), default=0)
-            stay_state[code] = {"available": available, "lowestPrice": cheapest}
+            stay_state[code] = {
+                f"{p['room_type']}|{p['plan_name']}": p["price"] for p in plans
+            }
 
         if newly_available:
             lines = [f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）"]
             for hotel, plans in newly_available:
-                cheapest = min(plans, key=lambda p: p["price"])
-                tag = "🔒僅限會員" if cheapest["member_only"] else ""
-                lines.append(
-                    f"- {hotel['name']}（{cheapest['room_type']}）：¥{cheapest['price']}〜 {tag}\n"
-                    f"  {room_plan_url(config, stay, hotel['code'])}"
-                )
+                for p in plans:
+                    tag = "🔒僅限會員" if p["member_only"] else ""
+                    lines.append(
+                        f"- {hotel['name']}（{p['room_type']}）：¥{p['price']}〜 {tag}\n"
+                        f"  {room_plan_url(config, stay, hotel['code'])}"
+                    )
             message = "\n".join(lines)
             notify_discord(webhook_url, message)
-            total_notified += len(newly_available)
+            total_notified += sum(len(plans) for _, plans in newly_available)
             print(f"[{timestamp}] Sent notification for {len(newly_available)} hotel(s) ({stay_key}).")
 
     save_state(state)
