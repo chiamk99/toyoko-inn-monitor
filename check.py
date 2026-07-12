@@ -36,14 +36,14 @@ def to_china_utc_iso(date_str):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def fetch_prices(config):
+def fetch_prices(config, stay):
     codes = [h["code"] for h in config["hotels"]]
     payload = {
         "0": {
             "json": {
                 "hotelCodes": codes,
-                "checkinDate": to_china_utc_iso(config["checkin"]),
-                "checkoutDate": to_china_utc_iso(config["checkout"]),
+                "checkinDate": to_china_utc_iso(stay["checkin"]),
+                "checkoutDate": to_china_utc_iso(stay["checkout"]),
                 "numberOfPeople": config["people"],
                 "numberOfRoom": config["room"],
                 "smokingType": config["smoking"],
@@ -61,11 +61,11 @@ def fetch_prices(config):
     return data[0]["result"]["data"]["json"]["prices"]
 
 
-def hotel_detail_url(config, code):
+def hotel_detail_url(config, stay, code):
     return (
         f"https://www.toyoko-inn.com/china/search/detail/{code}/"
         f"?people={config['people']}&room={config['room']}&smoking={config['smoking']}"
-        f"&start={config['checkin']}&end={config['checkout']}"
+        f"&start={stay['checkin']}&end={stay['checkout']}"
     )
 
 
@@ -96,33 +96,40 @@ def main():
     webhook_url = get_webhook_url()
     state = load_state()
 
-    prices = fetch_prices(config)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_notified = 0
 
-    newly_available = []
-    for hotel in config["hotels"]:
-        code = hotel["code"]
-        info = prices.get(code, {})
-        available = bool(info.get("existEnoughVacantRooms")) or info.get("lowestPrice", 0) > 0
-        was_available = state.get(code, {}).get("available", False)
+    for stay in config["stays"]:
+        stay_key = f"{stay['checkin']}_{stay['checkout']}"
+        stay_state = state.setdefault(stay_key, {})
+        prices = fetch_prices(config, stay)
 
-        if available and not was_available:
-            newly_available.append((hotel, info))
+        newly_available = []
+        for hotel in config["hotels"]:
+            code = hotel["code"]
+            info = prices.get(code, {})
+            available = bool(info.get("existEnoughVacantRooms")) or info.get("lowestPrice", 0) > 0
+            was_available = stay_state.get(code, {}).get("available", False)
 
-        state[code] = {"available": available, "lowestPrice": info.get("lowestPrice", 0)}
+            if available and not was_available:
+                newly_available.append((hotel, info))
+
+            stay_state[code] = {"available": available, "lowestPrice": info.get("lowestPrice", 0)}
+
+        if newly_available:
+            lines = [f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）"]
+            for hotel, info in newly_available:
+                price = info.get("lowestPrice", 0)
+                price_text = f"¥{price}〜" if price else "有空房"
+                lines.append(f"- {hotel['name']}：{price_text}\n  {hotel_detail_url(config, stay, hotel['code'])}")
+            message = "\n".join(lines)
+            notify_discord(webhook_url, message)
+            total_notified += len(newly_available)
+            print(f"[{timestamp}] Sent notification for {len(newly_available)} hotel(s) ({stay_key}).")
 
     save_state(state)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if newly_available:
-        lines = [f"🏨 **有房通知**（{config['checkin']} ~ {config['checkout']}）"]
-        for hotel, info in newly_available:
-            price = info.get("lowestPrice", 0)
-            price_text = f"¥{price}〜" if price else "有空房"
-            lines.append(f"- {hotel['name']}：{price_text}\n  {hotel_detail_url(config, hotel['code'])}")
-        message = "\n".join(lines)
-        notify_discord(webhook_url, message)
-        print(f"[{timestamp}] Sent notification for {len(newly_available)} hotel(s).")
-    else:
+    if total_notified == 0:
         print(f"[{timestamp}] No new vacancies.")
 
 
