@@ -19,8 +19,8 @@
   },
   "2026-08-03_2026-08-04": {
     "00316": {
-      "available": false,
-      "lowestPrice": 0
+      "available": true,
+      "lowestPrice": 12255
     },
     "00331": {
       "available": false,

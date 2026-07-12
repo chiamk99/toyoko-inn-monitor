@@ -36,37 +36,58 @@ def to_china_utc_iso(date_str):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def fetch_prices(config, stay):
-    codes = [h["code"] for h in config["hotels"]]
-    payload = {
-        "0": {
-            "json": {
-                "hotelCodes": codes,
-                "checkinDate": to_china_utc_iso(stay["checkin"]),
-                "checkoutDate": to_china_utc_iso(stay["checkout"]),
-                "numberOfPeople": config["people"],
-                "numberOfRoom": config["room"],
-                "smokingType": config["smoking"],
-            },
-            "meta": {"values": {"checkinDate": ["Date"], "checkoutDate": ["Date"]}},
-        }
-    }
-    url = (
-        "https://www.toyoko-inn.com/api/trpc/hotels.availabilities.prices"
-        "?batch=1&input=" + urllib.parse.quote(json.dumps(payload, separators=(",", ":")))
+def room_plan_url(config, stay, code):
+    return (
+        "https://www.toyoko-inn.com/china/search/result/room_plan/"
+        f"?hotel={code}&people={config['people']}&room={config['room']}"
+        f"&smoking={config['smoking']}&start={stay['checkin']}&end={stay['checkout']}"
     )
+
+
+def extract_json_object(html, key):
+    marker = f'"{key}":'
+    idx = html.find(marker)
+    if idx == -1:
+        return None
+    start = idx + len(marker)
+    depth = 0
+    for i in range(start, len(html)):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(html[start : i + 1])
+    return None
+
+
+def fetch_available_plans(config, stay, code):
+    url = room_plan_url(config, stay, code)
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=20, context=SSL_CONTEXT) as resp:
-        data = json.load(resp)
-    return data[0]["result"]["data"]["json"]["prices"]
+        html = resp.read().decode("utf-8", errors="ignore")
 
+    plan_response = extract_json_object(html, "planResponse")
+    if not plan_response:
+        return []
 
-def hotel_detail_url(config, stay, code):
-    return (
-        f"https://www.toyoko-inn.com/china/search/detail/{code}/"
-        f"?people={config['people']}&room={config['room']}&smoking={config['smoking']}"
-        f"&start={stay['checkin']}&end={stay['checkout']}"
-    )
+    found = []
+    for room_type in plan_response.get("roomTypeList", []):
+        for plan in room_type.get("plans", []):
+            vacant = plan.get("vacant", {})
+            general = vacant.get("generalVacantRoom", 0)
+            membership = vacant.get("membershipVacantRoom", 0)
+            if general > 0 or membership > 0:
+                price = plan["price"]["generalPrice"] if general > 0 else plan["price"]["membershipPrice"]
+                found.append(
+                    {
+                        "room_type": room_type.get("roomTypeName", ""),
+                        "plan_name": plan.get("planName", ""),
+                        "price": price,
+                        "member_only": general == 0 and membership > 0,
+                    }
+                )
+    return found
 
 
 def notify_discord(webhook_url, content):
@@ -102,26 +123,29 @@ def main():
     for stay in config["stays"]:
         stay_key = f"{stay['checkin']}_{stay['checkout']}"
         stay_state = state.setdefault(stay_key, {})
-        prices = fetch_prices(config, stay)
 
         newly_available = []
         for hotel in config["hotels"]:
             code = hotel["code"]
-            info = prices.get(code, {})
-            available = bool(info.get("existEnoughVacantRooms")) or info.get("lowestPrice", 0) > 0
+            plans = fetch_available_plans(config, stay, code)
+            available = len(plans) > 0
             was_available = stay_state.get(code, {}).get("available", False)
 
             if available and not was_available:
-                newly_available.append((hotel, info))
+                newly_available.append((hotel, plans))
 
-            stay_state[code] = {"available": available, "lowestPrice": info.get("lowestPrice", 0)}
+            cheapest = min((p["price"] for p in plans), default=0)
+            stay_state[code] = {"available": available, "lowestPrice": cheapest}
 
         if newly_available:
             lines = [f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）"]
-            for hotel, info in newly_available:
-                price = info.get("lowestPrice", 0)
-                price_text = f"¥{price}〜" if price else "有空房"
-                lines.append(f"- {hotel['name']}：{price_text}\n  {hotel_detail_url(config, stay, hotel['code'])}")
+            for hotel, plans in newly_available:
+                cheapest = min(plans, key=lambda p: p["price"])
+                tag = "🔒僅限會員" if cheapest["member_only"] else ""
+                lines.append(
+                    f"- {hotel['name']}（{cheapest['room_type']}）：¥{cheapest['price']}〜 {tag}\n"
+                    f"  {room_plan_url(config, stay, hotel['code'])}"
+                )
             message = "\n".join(lines)
             notify_discord(webhook_url, message)
             total_notified += len(newly_available)
