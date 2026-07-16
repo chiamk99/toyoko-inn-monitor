@@ -73,6 +73,7 @@ def fetch_available_plans(config, stay, code):
 
     found = []
     for room_type in plan_response.get("roomTypeList", []):
+        is_smoking = room_type.get("specs", {}).get("isSmoking", False)
         for plan in room_type.get("plans", []):
             vacant = plan.get("vacant", {})
             general = vacant.get("generalVacantRoom", 0)
@@ -85,6 +86,7 @@ def fetch_available_plans(config, stay, code):
                         "plan_name": plan.get("planName", ""),
                         "price": price,
                         "member_only": general == 0 and membership > 0,
+                        "is_smoking": is_smoking,
                     }
                 )
     return found
@@ -130,23 +132,24 @@ def main():
             plans = fetch_available_plans(config, stay, code)
             previously_available = set(stay_state.get(code, {}))
 
-            new_plans = [
-                p for p in plans if f"{p['room_type']}|{p['plan_name']}" not in previously_available
-            ]
+            def plan_key(p):
+                smoking_label = "吸菸" if p["is_smoking"] else "禁菸"
+                return f"{p['room_type']}|{smoking_label}|{p['plan_name']}"
+
+            new_plans = [p for p in plans if plan_key(p) not in previously_available]
             if new_plans:
                 newly_available.append((hotel, new_plans))
 
-            stay_state[code] = {
-                f"{p['room_type']}|{p['plan_name']}": p["price"] for p in plans
-            }
+            stay_state[code] = {plan_key(p): p["price"] for p in plans}
 
         if newly_available:
             lines = [f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）"]
             for hotel, plans in newly_available:
                 for p in plans:
                     tag = "🔒僅限會員" if p["member_only"] else ""
+                    smoking_tag = "🚬吸菸房" if p["is_smoking"] else "🚭禁菸房"
                     lines.append(
-                        f"- {hotel['name']}（{p['room_type']}）：¥{p['price']}〜 {tag}\n"
+                        f"- {hotel['name']}（{p['room_type']}・{smoking_tag}）：¥{p['price']}〜 {tag}\n"
                         f"  {room_plan_url(config, stay, hotel['code'])}"
                     )
             message = "\n".join(lines)
