@@ -1,15 +1,14 @@
 {
-  "people": 1,
+  "people": 2,
   "room": 1,
-  "smoking": "all",
+  "smoking": "noSmoking",
   "stays": [
-    { "checkin": "2026-08-02", "checkout": "2026-08-03" },
-    { "checkin": "2026-08-03", "checkout": "2026-08-04" }
+    { "checkin": "2026-11-21", "checkout": "2026-11-22" }
   ],
   "hotels": [
-    { "code": "00316", "name": "東橫INN 上越妙高站西口" },
-    { "code": "00331", "name": "東橫INN 燕三條站前" },
-    { "code": "00186", "name": "東橫INN 新潟古町" },
-    { "code": "00060", "name": "東橫INN 新潟站前" }
+    { "code": "00152", "name": "東橫INN 小倉站南口" },
+    { "code": "00360", "name": "東橫INN 小倉站北口" },
+    { "code": "00219", "name": "東橫INN 小倉站新幹線口" },
+    { "code": "00179", "name": "東橫INN 北九州機場" }
   ]
 }
