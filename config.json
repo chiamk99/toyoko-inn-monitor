@@ -3,12 +3,27 @@
   "room": 1,
   "smoking": "noSmoking",
   "stays": [
-    { "checkin": "2026-11-21", "checkout": "2026-11-22" }
+    {
+      "checkin": "2026-11-21",
+      "checkout": "2026-11-25"
+    }
   ],
   "hotels": [
-    { "code": "00152", "name": "東橫INN 小倉站南口" },
-    { "code": "00360", "name": "東橫INN 小倉站北口" },
-    { "code": "00219", "name": "東橫INN 小倉站新幹線口" },
-    { "code": "00179", "name": "東橫INN 北九州機場" }
+    {
+      "code": "00152",
+      "name": "東橫INN 小倉站南口"
+    },
+    {
+      "code": "00360",
+      "name": "東橫INN 小倉站北口"
+    },
+    {
+      "code": "00219",
+      "name": "東橫INN 小倉站新幹線口"
+    },
+    {
+      "code": "00179",
+      "name": "東橫INN 北九州機場"
+    }
   ]
 }
