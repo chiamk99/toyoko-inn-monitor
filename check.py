@@ -5,6 +5,7 @@ import ssl
 import sys
 import urllib.request
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -114,6 +115,29 @@ def save_state(state):
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
 
+def plan_key(p):
+    smoking_label = "吸菸" if p["is_smoking"] else "禁菸"
+    return f"{p['room_type']}|{smoking_label}|{p['plan_name']}"
+
+
+def safe_fetch(config, stay, code):
+    try:
+        return fetch_available_plans(config, stay, code)
+    except Exception as e:
+        print(f"fetch failed for {code}: {e}", file=sys.stderr)
+        return None
+
+
+def send_chunked(webhook_url, header, lines):
+    chunk = header
+    for line in lines:
+        if len(chunk) + len(line) + 1 > 1900:
+            notify_discord(webhook_url, chunk)
+            chunk = header
+        chunk += "\n" + line
+    notify_discord(webhook_url, chunk)
+
+
 def main():
     config = json.loads(CONFIG_PATH.read_text())
     webhook_url = get_webhook_url()
@@ -121,46 +145,50 @@ def main():
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total_notified = 0
+    failures = 0
 
     for stay in config["stays"]:
         stay_key = f"{stay['checkin']}_{stay['checkout']}"
         stay_state = state.setdefault(stay_key, {})
 
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(
+                pool.map(lambda h: safe_fetch(config, stay, h["code"]), config["hotels"])
+            )
+
         newly_available = []
-        for hotel in config["hotels"]:
+        for hotel, plans in zip(config["hotels"], results):
             code = hotel["code"]
-            plans = fetch_available_plans(config, stay, code)
+            if plans is None:
+                failures += 1
+                continue
             previously_available = set(stay_state.get(code, {}))
-
-            def plan_key(p):
-                smoking_label = "吸菸" if p["is_smoking"] else "禁菸"
-                return f"{p['room_type']}|{smoking_label}|{p['plan_name']}"
-
             new_plans = [p for p in plans if plan_key(p) not in previously_available]
             if new_plans:
                 newly_available.append((hotel, new_plans))
-
             stay_state[code] = {plan_key(p): p["price"] for p in plans}
 
         if newly_available:
-            lines = [f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）"]
+            lines = []
             for hotel, plans in newly_available:
-                for p in plans:
-                    tag = "🔒僅限會員" if p["member_only"] else ""
-                    smoking_tag = "🚬吸菸房" if p["is_smoking"] else "🚭禁菸房"
-                    lines.append(
-                        f"- {hotel['name']}（{p['room_type']}・{smoking_tag}）：¥{p['price']}〜 {tag}\n"
-                        f"  {room_plan_url(config, stay, hotel['code'])}"
-                    )
-            message = "\n".join(lines)
-            notify_discord(webhook_url, message)
+                details = "、".join(
+                    f"{p['room_type']}{'🚬' if p['is_smoking'] else '🚭'}¥{p['price']}"
+                    f"{'🔒會員' if p['member_only'] else ''}"
+                    for p in plans
+                )
+                lines.append(f"- {hotel['name']}：{details}\n  {room_plan_url(config, stay, hotel['code'])}")
+            send_chunked(
+                webhook_url,
+                f"🏨 **有房通知**（{stay['checkin']} ~ {stay['checkout']}）",
+                lines,
+            )
             total_notified += sum(len(plans) for _, plans in newly_available)
             print(f"[{timestamp}] Sent notification for {len(newly_available)} hotel(s) ({stay_key}).")
 
     save_state(state)
 
     if total_notified == 0:
-        print(f"[{timestamp}] No new vacancies.")
+        print(f"[{timestamp}] No new vacancies." + (f" ({failures} fetch failures)" if failures else ""))
 
 
 if __name__ == "__main__":

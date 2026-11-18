@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Poll every 30 seconds for ~5.5 hours
+      - name: Poll every ~2 minutes for ~5.5 hours
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -39,7 +39,7 @@ jobs:
               git pull --rebase -q || true
               git push -q || true
             fi
-            sleep 30
+            sleep 120
           done
 
       - name: Re-trigger next loop
